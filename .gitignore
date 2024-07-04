@@ -9,9 +9,15 @@ __pycache__/
 
 # VSCode settings
 .vscode/
+*.swp
+*.swo
 
 # Environment
 .env
+
+# Virtual environment
+venv/
+env/
 
 # Operating system files
 .DS_Store

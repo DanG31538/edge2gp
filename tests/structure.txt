@@ -1,0 +1,22 @@
+EXPLORER
+└── BLENDER
+    └── edge2gp
+        ├── .vscode
+        │   ├── launch.json
+        │   └── settings.json
+        ├── scripts
+        │   ├── __init__.py
+        │   ├── main.py
+        │   └── utils.py
+        ├── tests
+        │   ├── run_blender_script.py
+        │   ├── test_blender.py
+        │   └── test_main.py
+        ├── .gitignore
+        └── requirements.txt
+    └── Render
+    ├── 4rdrotoattempt.blend
+    ├── tutorial.blend
+    ├── video texture test.blend
+    ├── website_assets.blend
+    └── website_assets.blend1
