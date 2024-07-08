@@ -1,45 +1,96 @@
 import bpy
-import cv2
 import numpy as np
-from .utils import add_noise_to_points, vary_points_from_edges
+import cv2
 
-def edge_to_grease_pencil(image_path, noise_amount=0.1, variation_amount=0.05):
-    # Load the image
-    img = cv2.imread(image_path)
-    if img is None:
-        raise ValueError(f"Could not load image from {image_path}")
+print("main.py is being executed")
+
+def get_movie_frame_pixels():
+    print("Attempting to get movie frame pixels")
+    for image in bpy.data.images:
+        if image.source == 'MOVIE':
+            print(f"Found movie: {image.name}")
+            frame = bpy.context.scene.frame_current
+            image.update()
+            print(f"Processing frame {frame} of movie {image.name}")
+            
+            if image.has_data:
+                pixels = np.array(image.pixels[:])
+                width, height = image.size
+                print(f"Successfully got movie frame pixels: {width}x{height}")
+                return pixels.reshape((height, width, 4))  # RGBA format
+    print("Failed to get movie frame pixels")
+    return None
+
+def create_outline_stroke(edges, frame):
+    # Find contours using OpenCV
+    contours, _ = cv2.findContours(edges, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+    print(f"Found {len(contours)} contours")
+
+    # Create a single stroke for the outline
+    stroke = frame.strokes.new()
+    stroke.display_mode = '3DSPACE'
     
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    all_points = []
+    for contour in contours:
+        # Include all contours, no minimum area threshold
+        epsilon = 0.001 * cv2.arcLength(contour, True)  # Reduced epsilon for more detail
+        approx = cv2.approxPolyDP(contour, epsilon, True)
+        all_points.extend(approx.reshape(-1, 2))
+
+    print(f"Total points: {len(all_points)}")
+
+    # Add points to the stroke
+    stroke.points.add(len(all_points))
+    for i, point in enumerate(all_points):
+        # Swap x and y, and invert y to correct orientation
+        x = 1 - (point[1] / edges.shape[0])
+        y = point[0] / edges.shape[1]
+        stroke.points[i].co = (x, y, 0)
     
-    # Detect edges
-    edges = cv2.Canny(gray, 100, 200)
+    print(f"Added stroke with {len(all_points)} points")
+
+def edge_to_grease_pencil(gpencil, noise_amount=0.1, variation_amount=0.05):
+    print("Starting edge_to_grease_pencil")
     
-    # Get active Grease Pencil object and layer
-    gpencil = bpy.context.active_object
-    if not gpencil or gpencil.type != 'GPENCIL':
-        raise ValueError("No active Grease Pencil object")
+    # Get the current frame pixels
+    frame_pixels = get_movie_frame_pixels()
+    if frame_pixels is None:
+        raise ValueError("Could not get movie frame pixels")
+    print(f"Frame pixels shape: {frame_pixels.shape}")
+    
+    # Convert to grayscale
+    gray = (np.dot(frame_pixels[...,:3], [0.299, 0.587, 0.114]) * 255).astype(np.uint8)
+    
+    # Edge detection with lower thresholds for more edges
+    edges = cv2.Canny(gray, 30, 100)  # Lowered thresholds
     
     gp_layer = gpencil.data.layers.active
     if not gp_layer:
         raise ValueError("No active Grease Pencil layer")
+    print(f"Using Grease Pencil object: {gpencil.name}, Layer: {gp_layer.info}")
     
-    # Create a new frame or get the current frame
-    frame = gp_layer.frames.new(bpy.context.scene.frame_current)
+    # Get or create a new frame
+    current_frame = bpy.context.scene.frame_current
+    frame = None
+    for f in gp_layer.frames:
+        if f.frame_number == current_frame:
+            frame = f
+            break
     
-    # Create a new stroke
-    stroke = frame.strokes.new()
-    stroke.display_mode = '3DSPACE'
+    if frame is None:
+        frame = gp_layer.frames.new(current_frame)
+        print(f"Created new frame at {current_frame}")
+    else:
+        print(f"Using existing frame at {current_frame}")
+        frame.clear()
     
-    # Convert edge pixels to 3D points
-    points = np.column_stack(np.where(edges > 0))
+    # Create outline stroke
+    create_outline_stroke(edges, frame)
     
-    # Add noise and variation
-    points = add_noise_to_points(points, noise_amount)
-    points = vary_points_from_edges(points, variation_amount)
-    
-    # Add points to the stroke
-    stroke.points.add(len(points))
-    for i, point in enumerate(points):
-        stroke.points[i].co = (point[1], -point[0], 0)  # Negating y to match Blender's coordinate system
-    
-    return gpencil
+    print(f"Created outline stroke for frame {current_frame}")
+
+    # Adjust Grease Pencil object scale and rotation
+    gpencil.scale = (1, 1, 1)  # Reset scale
+    gpencil.rotation_euler = (0, 0, 0)  # Reset rotation
+
+print("main.py finished loading")
