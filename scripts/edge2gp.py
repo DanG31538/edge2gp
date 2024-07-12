@@ -3,48 +3,61 @@ import os
 import sys
 import importlib
 
-print("Script is running")
-
-# Add the correct directory to sys.path
-script_dir = r"C:\Users\DanTh\Documents\Blender\edge2gp\scripts"
+# Add the script directory to sys.path
+script_dir = os.path.dirname(os.path.abspath(__file__))
 if script_dir not in sys.path:
     sys.path.append(script_dir)
-    print(f"Added {script_dir} to sys.path")
 
-print(f"Current sys.path: {sys.path}")
+# Import other modules
+import main
+import blender_utils
 
-try:
-    import main
-    importlib.reload(main)  # This will reload the module even if it was previously imported
-    from main import edge_to_grease_pencil
-    print("Successfully imported edge_to_grease_pencil")
-except ImportError as e:
-    print(f"Failed to import edge_to_grease_pencil: {e}")
-    print(f"Current working directory: {os.getcwd()}")
-    print(f"Content of script directory: {os.listdir(script_dir)}")
+# Ensure modules are reloaded in case of changes
+importlib.reload(main)
+importlib.reload(blender_utils)
 
-def main():
-    print("Starting main function")
-    
-    # Get the active Grease Pencil object
-    gpencil = bpy.context.active_object
-    if not gpencil or gpencil.type != 'GPENCIL':
-        print("Error: No active Grease Pencil object")
-        return
-
-    # Add edge strokes to current Grease Pencil layer
+def run_edge2gp():
     try:
-        edge_to_grease_pencil(gpencil, noise_amount=0.1, variation_amount=0.05)
-        print(f"Added edge strokes to Grease Pencil object: {gpencil.name}")
+        main.edge_to_grease_pencil()
+        print("Edge2GP process completed successfully")
     except Exception as e:
-        print(f"Error in edge_to_grease_pencil: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        return
+        print(f"Error in Edge2GP process: {str(e)}")
 
-    print("Edge to Grease Pencil conversion completed for the current frame!")
+# Addon Classes (for future use)
+class EDGE2GP_OT_run(bpy.types.Operator):
+    bl_idname = "edge2gp.run"
+    bl_label = "Run Edge2GP"
+    bl_description = "Run the Edge2GP process"
+
+    def execute(self, context):
+        run_edge2gp()
+        return {'FINISHED'}
+
+class EDGE2GP_PT_panel(bpy.types.Panel):
+    bl_label = "Edge2GP"
+    bl_idname = "EDGE2GP_PT_panel"
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category = 'Edge2GP'
+
+    def draw(self, context):
+        layout = self.layout
+        layout.operator("edge2gp.run")
+
+# Registration functions (for future addon use)
+def register():
+    bpy.utils.register_class(EDGE2GP_OT_run)
+    bpy.utils.register_class(EDGE2GP_PT_panel)
+    blender_utils.register_image_viewer()
+
+def unregister():
+    bpy.utils.unregister_class(EDGE2GP_OT_run)
+    bpy.utils.unregister_class(EDGE2GP_PT_panel)
+    blender_utils.unregister_image_viewer()
 
 if __name__ == "__main__":
-    main()
-
-print("Script finished")
+    # For development, just run the main function
+    run_edge2gp()
+    
+    # Uncomment the following line to test addon functionality
+    # register()
