@@ -51,10 +51,16 @@ def visualize_numpy_array(array, name="Visualization"):
         # If no Image Editor is found, create one by splitting the 3D View
         for area in bpy.context.screen.areas:
             if area.type == 'VIEW_3D':
+                # Create a new context override
                 override = bpy.context.copy()
                 override['area'] = area
-                bpy.ops.screen.area_split(override, direction='VERTICAL', factor=0.5)
-                area = area.new_areas[-1]
+                override['region'] = area.regions[-1]  # Use the last region in the area
+                
+                with bpy.context.temp_override(**override):
+                    bpy.ops.screen.area_split(direction='VERTICAL', factor=0.5)
+                
+                # The new area is the last one in the list
+                area = bpy.context.screen.areas[-1]
                 area.type = 'IMAGE_EDITOR'
                 break
 

@@ -1,22 +1,36 @@
 import cv2
 import numpy as np
-from ultralytics import YOLO
+import torch
 import os
+import logging
+
+# Setup logging
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
 
 # Path to the YOLO model file
-MODEL_PATH = 'yolov8x-seg.pt'
+MODEL_NAME = 'yolov8x-seg.pt'
+EDGE2GP_DIR = r"C:\Users\DanTh\Documents\Blender\edge2gp"  # Update this path if necessary
+MODEL_PATH = os.path.join(EDGE2GP_DIR, MODEL_NAME)
 
 def load_yolo_model():
+    logger.debug(f"Attempting to load YOLO model from: {MODEL_PATH}")
     if not os.path.exists(MODEL_PATH):
-        print(f"Downloading YOLO model: {MODEL_PATH}")
-        model = YOLO(MODEL_PATH)
-    else:
-        print(f"Loading YOLO model from: {MODEL_PATH}")
-        model = YOLO(MODEL_PATH)
-    return model
+        logger.error(f"YOLO model not found at: {MODEL_PATH}")
+        raise FileNotFoundError(f"YOLO model not found at: {MODEL_PATH}")
+    
+    logger.info(f"Loading YOLO model from: {MODEL_PATH}")
+    try:
+        # Load the model weights directly using PyTorch
+        model = torch.load(MODEL_PATH, map_location='cpu')
+        logger.info("YOLO model loaded successfully")
+        return model
+    except Exception as e:
+        logger.error(f"Error loading YOLO model: {str(e)}")
+        raise
 
 def perform_yolo_segmentation(frame_pixels, confidence_threshold=0.3):
-    print("Starting YOLO segmentation")
+    logger.info("Starting YOLO segmentation")
     
     # Ensure frame_pixels is in the correct format (uint8, BGR)
     if frame_pixels.dtype != np.uint8:
@@ -30,35 +44,41 @@ def perform_yolo_segmentation(frame_pixels, confidence_threshold=0.3):
     try:
         model = load_yolo_model()
     except Exception as e:
-        print(f"Error loading YOLO model: {str(e)}")
-        return None
+        logger.error(f"Error loading YOLO model: {str(e)}")
+        return None, None
 
     # Perform YOLO segmentation
     try:
-        results = model(frame_pixels, task='segment', conf=confidence_threshold)
-    except Exception as e:
-        print(f"Error during YOLO segmentation: {str(e)}")
-        return None
-
-    # Process segmentation results
-    segmentation_mask = np.zeros(frame_pixels.shape[:2], dtype=np.uint8)
-    object_data = []
-
-    for r in results:
-        for seg, box, cls, conf in zip(r.masks.xy, r.boxes.xyxy, r.boxes.cls, r.boxes.conf):
-            if conf > confidence_threshold:
-                # Add segmentation to mask
-                cv2.fillPoly(segmentation_mask, [seg.astype(np.int32)], 255)
+        logger.debug("Performing YOLO segmentation")
+        # Convert frame to tensor
+        frame_tensor = torch.from_numpy(frame_pixels).float().permute(2, 0, 1).unsqueeze(0) / 255.0
+        
+        # Run inference
+        with torch.no_grad():
+            output = model(frame_tensor)
+        
+        # Process output to create segmentation mask and object data
+        segmentation_mask = np.zeros(frame_pixels.shape[:2], dtype=np.uint8)
+        object_data = []
+        
+        for detection in output[0]:
+            if detection[4] > confidence_threshold:
+                x1, y1, x2, y2 = detection[:4].int().cpu().numpy()
+                cv2.rectangle(segmentation_mask, (x1, y1), (x2, y2), 255, -1)
                 
-                # Store object data
                 object_data.append({
-                    'class': model.names[int(cls)],
-                    'confidence': float(conf),
-                    'bbox': box.tolist(),
-                    'segmentation': seg.tolist()
+                    'class': 'object',  # We don't have class names in this simplified version
+                    'confidence': float(detection[4]),
+                    'bbox': [x1, y1, x2, y2],
+                    'segmentation': [[x1, y1], [x2, y1], [x2, y2], [x1, y2]]
                 })
+        
+        logger.debug("YOLO segmentation completed")
+    except Exception as e:
+        logger.error(f"Error during YOLO segmentation: {str(e)}")
+        return None, None
 
-    print(f"Segmentation completed. Found {len(object_data)} objects.")
+    logger.info(f"Segmentation completed. Found {len(object_data)} objects.")
     return segmentation_mask, object_data
 
 def draw_segmentation_results(image, segmentation_mask, object_data):
@@ -71,34 +91,10 @@ def draw_segmentation_results(image, segmentation_mask, object_data):
     for obj in object_data:
         bbox = obj['bbox']
         cv2.rectangle(result_image, (int(bbox[0]), int(bbox[1])), (int(bbox[2]), int(bbox[3])), (0, 255, 0), 2)
-        cv2.putText(result_image, f"{obj['class']} {obj['confidence']:.2f}", (int(bbox[0]), int(bbox[1] - 10)),
+        cv2.putText(result_image, f"Object {obj['confidence']:.2f}", (int(bbox[0]), int(bbox[1] - 10)),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
 
     return result_image
 
 if __name__ == "__main__":
-    # Test the function with a sample image
-    import matplotlib.pyplot as plt
-    
-    # Load a sample image (replace with your own test image)
-    sample_image = cv2.imread('sample_image.jpg')
-    if sample_image is None:
-        print("Failed to load sample image. Make sure 'sample_image.jpg' exists.")
-    else:
-        segmentation_mask, object_data = perform_yolo_segmentation(sample_image)
-        if segmentation_mask is not None:
-            result_image = draw_segmentation_results(sample_image, segmentation_mask, object_data)
-            
-            plt.figure(figsize=(15, 5))
-            plt.subplot(131), plt.imshow(cv2.cvtColor(sample_image, cv2.COLOR_BGR2RGB))
-            plt.title('Original Image'), plt.axis('off')
-            plt.subplot(132), plt.imshow(segmentation_mask, cmap='gray')
-            plt.title('Segmentation Mask'), plt.axis('off')
-            plt.subplot(133), plt.imshow(cv2.cvtColor(result_image, cv2.COLOR_BGR2RGB))
-            plt.title('Segmentation Results'), plt.axis('off')
-            plt.tight_layout()
-            plt.show()
-            
-            print("Detected Objects:")
-            for obj in object_data:
-                print(f"- {obj['class']} (Confidence: {obj['confidence']:.2f})")
+    logger.debug("YOLO segmentation module loaded")

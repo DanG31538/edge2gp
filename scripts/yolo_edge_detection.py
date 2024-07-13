@@ -1,22 +1,41 @@
 import cv2
 import numpy as np
-from ultralytics import YOLO
+import torch
 import os
+import logging
+
+# Setup logging
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
 
 # Path to the YOLO model file
-MODEL_PATH = 'yolov8x-seg.pt'
+MODEL_NAME = 'yolov8x-seg.pt'
+EDGE2GP_DIR = r"C:\Users\DanTh\Documents\Blender\edge2gp"  # Update this path if necessary
+MODEL_PATH = os.path.join(EDGE2GP_DIR, MODEL_NAME)
 
 def load_yolo_model():
+    logger.debug(f"Attempting to load YOLO model from: {MODEL_PATH}")
     if not os.path.exists(MODEL_PATH):
-        print(f"Downloading YOLO model: {MODEL_PATH}")
-        model = YOLO(MODEL_PATH)
-    else:
-        print(f"Loading YOLO model from: {MODEL_PATH}")
-        model = YOLO(MODEL_PATH)
-    return model
+        logger.error(f"YOLO model not found at: {MODEL_PATH}")
+        raise FileNotFoundError(f"YOLO model not found at: {MODEL_PATH}")
+    
+    logger.info(f"Loading YOLO model from: {MODEL_PATH}")
+    try:
+        # Load the model weights
+        checkpoint = torch.load(MODEL_PATH, map_location='cpu')
+        
+        # Initialize the model (you might need to adjust this based on the actual model architecture)
+        from ultralytics.nn.tasks import attempt_load_weights
+        model = attempt_load_weights(checkpoint)
+        
+        logger.info("YOLO model loaded successfully")
+        return model
+    except Exception as e:
+        logger.error(f"Error loading YOLO model: {str(e)}")
+        raise
 
 def perform_yolo_edge_detection(frame_pixels):
-    print("Starting YOLO edge detection")
+    logger.info("Starting YOLO edge detection")
     
     # Ensure frame_pixels is in the correct format (uint8, BGR)
     if frame_pixels.dtype != np.uint8:
@@ -30,38 +49,35 @@ def perform_yolo_edge_detection(frame_pixels):
     try:
         model = load_yolo_model()
     except Exception as e:
-        print(f"Error loading YOLO model: {str(e)}")
+        logger.error(f"Error loading YOLO model: {str(e)}")
         return None
 
     # Perform YOLO segmentation
     try:
-        results = model(frame_pixels, task='segment')
+        logger.debug("Performing YOLO segmentation")
+        # Convert frame to tensor
+        frame_tensor = torch.from_numpy(frame_pixels).float().permute(2, 0, 1).unsqueeze(0) / 255.0
+        
+        # Run inference
+        with torch.no_grad():
+            output = model(frame_tensor)
+        
+        # Process output to create edge mask
+        edge_mask = np.zeros(frame_pixels.shape[:2], dtype=np.uint8)
+        
+        # Adjust this part based on the actual output format of your model
+        for detection in output[0]:
+            if len(detection) >= 6 and detection[4] > 0.5:  # Confidence threshold
+                x1, y1, x2, y2 = detection[:4].int().cpu().numpy()
+                cv2.rectangle(edge_mask, (x1, y1), (x2, y2), 255, 1)
+        
+        logger.debug("YOLO segmentation completed")
     except Exception as e:
-        print(f"Error during YOLO segmentation: {str(e)}")
+        logger.error(f"Error during YOLO segmentation: {str(e)}")
         return None
 
-    # Create edge mask
-    edge_mask = np.zeros(frame_pixels.shape[:2], dtype=np.uint8)
-    for r in results:
-        for seg in r.masks.xy:
-            cv2.polylines(edge_mask, [seg.astype(np.int32)], True, 255, 1)
-
-    print(f"Edge detection completed. Mask shape: {edge_mask.shape}")
+    logger.info(f"Edge detection completed. Mask shape: {edge_mask.shape}")
     return edge_mask
 
 if __name__ == "__main__":
-    # Test the function with a sample image
-    import matplotlib.pyplot as plt
-    
-    # Load a sample image (replace with your own test image)
-    sample_image = cv2.imread('sample_image.jpg')
-    if sample_image is None:
-        print("Failed to load sample image. Make sure 'sample_image.jpg' exists.")
-    else:
-        edge_mask = perform_yolo_edge_detection(sample_image)
-        if edge_mask is not None:
-            plt.subplot(121), plt.imshow(cv2.cvtColor(sample_image, cv2.COLOR_BGR2RGB))
-            plt.title('Original Image'), plt.axis('off')
-            plt.subplot(122), plt.imshow(edge_mask, cmap='gray')
-            plt.title('YOLO Edge Mask'), plt.axis('off')
-            plt.show()
+    logger.debug("YOLO edge detection module loaded")
